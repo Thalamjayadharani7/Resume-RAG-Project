@@ -3,34 +3,47 @@ from typing import List
 
 
 def retrieve_relevant_text(question: str, documents: List[str]) -> str:
+
     if not documents:
         return ""
 
-    question_terms = [term for term in re.findall(r"[a-zA-Z0-9]+", question.lower()) if len(term) > 2]
-    if not question_terms:
-        return documents[0]
+    question_terms = [
+        word
+        for word in re.findall(r"\w+", question.lower())
+        if len(word) > 2
+    ]
 
-    best_document = documents[0]
+    best_doc = documents[0]
     best_score = -1
 
     for document in documents:
+
+        score = 0
+
         doc_lower = document.lower()
-        score = sum(1 for term in question_terms if term in doc_lower)
+
+        for term in question_terms:
+            score += doc_lower.count(term)
+
         if score > best_score:
             best_score = score
-            best_document = document
+            best_doc = document
 
     if best_score <= 0:
-        return documents[0]
+        return best_doc
 
-    lines = [line.strip() for line in best_document.splitlines() if line.strip()]
-    relevant_lines = []
+    lines = best_doc.splitlines()
+
+    matched = []
+
     for line in lines:
-        line_lower = line.lower()
-        if any(term in line_lower for term in question_terms):
-            relevant_lines.append(line)
 
-    if relevant_lines:
-        return "\n".join(relevant_lines[:5])
+        lower = line.lower()
 
-    return "\n".join(lines[:5])
+        if any(term in lower for term in question_terms):
+            matched.append(line.strip())
+
+    if matched:
+        return "\n".join(matched[:20])
+
+    return best_doc
