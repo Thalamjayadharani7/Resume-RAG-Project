@@ -1,48 +1,25 @@
-<<<<<<< Updated upstream
 from __future__ import annotations
 
 
 class PromptBuilder:
-    """Build structured prompts for resume-based retrieval augmented generation."""
-
-    def __init__(self, system_instructions: str | None = None) -> None:
-        """Initialize the prompt builder with reusable system instructions."""
+    def __init__(self, system_instructions: str | None = None):
         self.system_instructions = system_instructions or (
-            "You are a precise assistant that answers questions using only the "
-            "provided retrieved context."
+            "You are an assistant that answers questions about resume content."
         )
 
     def build_prompt(self, retrieved_context: str, user_question: str) -> str:
-        """Create a complete prompt for the language model."""
-        if not isinstance(retrieved_context, str):
-            raise TypeError("retrieved_context must be a string.")
-        if not isinstance(user_question, str):
-            raise TypeError("user_question must be a string.")
+        safe_context = retrieved_context.strip() or "No relevant context available."
 
         return (
-            "System Instructions\n"
             f"{self.system_instructions}\n\n"
-            "Retrieved Context\n"
-            f"{retrieved_context}\n\n"
-            "User Question\n"
-            f"{user_question}\n\n"
-            "Clear Answering Rules\n"
-            "- Answer ONLY using the retrieved resume context.\n"
-            "- Never use outside knowledge.\n"
-            "- Never hallucinate.\n"
-            "- Never guess.\n"
-            "- If the answer is not available in the retrieved context, return exactly: "
-            '"The requested information is not available in the provided document."'
+            "Use only the provided context.\n"
+            "If the answer is not present, return exactly:\n"
+            '"The requested information is not available in the provided document."\n\n'
+            f"Question:\n{user_question}\n\n"
+            f"Resume Context:\n{safe_context}\n\n"
+            "Answer:"
         )
-=======
+
+
 def create_prompt(question: str, context: str) -> str:
-    safe_context = context.strip() or "No relevant context available."
-    return (
-        "You are an assistant that answers questions about resume content. "
-        "Use only the provided context. If the answer is not present, return exactly: "
-        "The requested information is not available in the provided document.\n\n"
-        f"Question: {question}\n\n"
-        f"Resume Context:\n{safe_context}\n\n"
-        "Answer:"
-    )
->>>>>>> Stashed changes
+    return PromptBuilder().build_prompt(context, question)
