@@ -1,2 +1,5 @@
-# Load the resume and extract text
-# Generate interview questions using the RAG pipeline
+from src.ui.app import main
+
+
+if __name__ == "__main__":
+    main()

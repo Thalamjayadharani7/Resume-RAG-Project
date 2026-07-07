@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 from __future__ import annotations
 
 import logging
@@ -123,3 +124,57 @@ class GeminiClient:
             raise GeminiAPIError("Gemini returned an empty response.")
 
         return str(response).strip()
+=======
+import os
+
+
+def generate_answer(prompt: str, question: str, context: str) -> str:
+    try:
+        import google.generativeai as genai
+    except Exception:
+        return heuristic_answer(question, context)
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return heuristic_answer(question, context)
+
+    try:
+        genai.configure(api_key=api_key)
+        model_name = os.getenv("MODEL_NAME", "gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        answer = getattr(response, "text", None)
+        if answer and str(answer).strip():
+            return str(answer).strip()
+    except Exception:
+        pass
+
+    return heuristic_answer(question, context)
+
+
+def heuristic_answer(question: str, context: str) -> str:
+    question_lower = question.lower()
+    lines = [line.strip() for line in context.splitlines() if line.strip()]
+
+    if any(keyword in question_lower for keyword in ["skill", "skills"]):
+        for line in lines:
+            if "skill" in line.lower():
+                return f"Based on the resume, the relevant skills mentioned are: {line}"
+
+    if any(keyword in question_lower for keyword in ["experience", "worked", "work"]):
+        for line in lines:
+            if "experience" in line.lower() or "work" in line.lower():
+                return f"The resume mentions: {line}"
+
+    if any(keyword in question_lower for keyword in ["education", "degree", "college", "university"]):
+        for line in lines:
+            if "education" in line.lower() or "degree" in line.lower():
+                return f"The resume mentions: {line}"
+
+    if any(keyword in question_lower for keyword in ["name", "email", "phone", "contact"]):
+        for line in lines:
+            if "@" in line or any(token in line.lower() for token in ["name", "phone", "contact"]):
+                return f"The resume mentions: {line}"
+
+    return "The requested information is not available in the provided document."
+>>>>>>> Stashed changes

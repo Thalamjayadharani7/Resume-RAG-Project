@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 from __future__ import annotations
 
 
@@ -33,3 +34,15 @@ class PromptBuilder:
             "- If the answer is not available in the retrieved context, return exactly: "
             '"The requested information is not available in the provided document."'
         )
+=======
+def create_prompt(question: str, context: str) -> str:
+    safe_context = context.strip() or "No relevant context available."
+    return (
+        "You are an assistant that answers questions about resume content. "
+        "Use only the provided context. If the answer is not present, return exactly: "
+        "The requested information is not available in the provided document.\n\n"
+        f"Question: {question}\n\n"
+        f"Resume Context:\n{safe_context}\n\n"
+        "Answer:"
+    )
+>>>>>>> Stashed changes
