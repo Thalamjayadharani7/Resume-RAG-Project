@@ -1,13 +1,22 @@
 # Environment files
 .env
+.env.*
 
 # Python cache
 __pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
 
 # Virtual environments
 venv/
 .venv/
+
+# Local data and model caches
+vector_db/
+.cache/
+cache/
+logs/
+*.log
 
 # VS Code settings
 .vscode/

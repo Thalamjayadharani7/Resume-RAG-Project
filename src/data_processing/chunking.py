@@ -49,7 +49,7 @@ class TextChunker:
                 logger.warning("Skipping empty document: %s", document.filename)
                 continue
 
-            for index, chunk_text in enumerate(self._split_text(document.text)):
+            for index, chunk_text in enumerate(self._deduplicate_chunks(self._split_text(document.text))):
                 chunk_id = f"{document.filename}__{index}"
                 chunks.append(
                     TextChunk(
@@ -119,3 +119,17 @@ class TextChunker:
             start = max(start + self.chunk_size - self.chunk_overlap, end)
 
         return split_chunks
+
+    def _deduplicate_chunks(self, chunks: Sequence[str]) -> list[str]:
+        """Remove repeated chunks while preserving order."""
+        unique_chunks: list[str] = []
+        seen: set[str] = set()
+        for chunk in chunks:
+            normalized_chunk = chunk.strip()
+            if not normalized_chunk:
+                continue
+            if normalized_chunk in seen:
+                continue
+            seen.add(normalized_chunk)
+            unique_chunks.append(normalized_chunk)
+        return unique_chunks

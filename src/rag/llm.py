@@ -7,9 +7,13 @@ from typing import Any
 from dotenv import load_dotenv
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import errors as genai_errors
+    from google.genai import types as genai_types
 except ImportError as exc:  # pragma: no cover - environment-specific
     genai = None
+    genai_errors = None
+    genai_types = None
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
@@ -22,7 +26,7 @@ class GeminiClientError(Exception):
 
 
 class GeminiAuthenticationError(GeminiClientError):
-    """Raised when the provided API key is invalid."""
+    """Raised when the provided API key is missing or invalid."""
 
 
 class GeminiAPIError(GeminiClientError):
@@ -33,16 +37,29 @@ class GeminiNetworkError(GeminiClientError):
     """Raised when a network issue prevents a Gemini request."""
 
 
+class GeminiRateLimitError(GeminiClientError):
+    """Raised when the Gemini API rate limit is exceeded."""
+
+
 class GeminiClient:
     """Client for communicating with Google's Gemini language model."""
 
-    def __init__(self, model_name: str = "gemini-1.5-flash", env_path: str | None = None) -> None:
+    def __init__(
+        self,
+        model_name: str | None = None,
+        env_path: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> None:
         """Initialize the Gemini client and load credentials from the environment."""
-        self.model_name = model_name
+        self.model_name = (model_name or os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")).strip()
         self.env_path = env_path
+        self.timeout_seconds = timeout_seconds
         self.api_key = self._load_api_key()
-        self._model: Any | None = None
-        self._initialize_model()
+        self._client: Any | None = None
+        if self.api_key:
+            self._initialize_model()
+        else:
+            logger.warning("Gemini client initialized without an API key; requests will return a friendly fallback message.")
 
     def _load_api_key(self) -> str:
         """Load the Google API key from a .env file or the environment."""
@@ -54,48 +71,76 @@ class GeminiClient:
         api_key = os.getenv("GOOGLE_API_KEY", "").strip()
         if not api_key:
             logger.error("GOOGLE_API_KEY is missing.")
-            raise GeminiAuthenticationError(
-                "GOOGLE_API_KEY is not set. Please configure it in the .env file."
-            )
+            return ""
         return api_key
 
     def _initialize_model(self) -> None:
-        """Configure the Gemini SDK and initialize the model."""
-        if genai is None:
+        """Configure the Gemini SDK and initialize the client."""
+        if genai is None or genai_types is None:
             raise GeminiAPIError(
-                "google-generativeai is not installed. Install the dependency to use Gemini."
+                "The google-genai package is not installed. Install the dependency to use Gemini."
             ) from _IMPORT_ERROR
 
         try:
-            genai.configure(api_key=self.api_key)
-            self._model = genai.GenerativeModel(self.model_name)
+            self._client = genai.Client(api_key=self.api_key)
+            logger.info("Initialized Gemini client for model '%s'", self.model_name)
         except Exception as exc:
-            logger.exception("Failed to initialize Gemini model.")
-            raise GeminiAPIError(f"Failed to initialize Gemini model: {exc}") from exc
+            logger.exception("Failed to initialize Gemini client.")
+            raise GeminiAPIError(f"Failed to initialize Gemini client: {exc}") from exc
 
     def generate_response(self, prompt: str) -> str:
         """Send a prompt to Gemini and return the generated text response."""
         if not isinstance(prompt, str) or not prompt.strip():
-            raise ValueError("prompt must be a non-empty string.")
+            logger.warning("Received an empty prompt for Gemini.")
+            return "I couldn't generate an answer because the prompt was empty."
 
-        if self._model is None:
-            raise GeminiAPIError("Gemini model is not initialized.")
+        if not self.api_key or self._client is None:
+            logger.error("Gemini client is not initialized because no valid API key is configured.")
+            return "The Gemini service is unavailable right now because the API key is missing or invalid."
 
         try:
-            response = self._model.generate_content(prompt)
-        except Exception as exc:
-            error_message = str(exc).lower()
-            if "api key" in error_message or "invalid" in error_message:
-                logger.error("Invalid Gemini API key.")
-                raise GeminiAuthenticationError("Invalid Google Gemini API key.") from exc
-            if any(token in error_message for token in ["network", "connection", "timeout", "temporarily"]):
-                logger.error("Network error while calling Gemini.")
-                raise GeminiNetworkError("Network error while communicating with Gemini.") from exc
-
-            logger.exception("Gemini API request failed.")
-            raise GeminiAPIError(f"Gemini API request failed: {exc}") from exc
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+            )
+        except Exception as exc:  # pragma: no cover - depends on SDK runtime
+            return self._handle_generation_error(exc)
 
         return self._extract_response_text(response)
+
+    def _handle_generation_error(self, exc: Exception) -> str:
+        """Translate Gemini SDK exceptions into friendly user-facing messages."""
+        error_message = str(exc).lower()
+        if isinstance(exc, GeminiClientError):
+            raise exc
+
+        if genai_errors is not None and isinstance(exc, genai_errors.APIError):
+            if "quota" in error_message or "resource exhausted" in error_message:
+                logger.warning("Gemini quota exceeded: %s", exc)
+                return "The Gemini service quota has been exceeded. Please try again later."
+            if "rate limit" in error_message or "429" in error_message:
+                logger.warning("Gemini rate limit exceeded: %s", exc)
+                return "The Gemini service is currently rate-limiting requests. Please try again shortly."
+            if "invalid model" in error_message or "model" in error_message and "not found" in error_message:
+                logger.warning("Gemini model is invalid: %s", exc)
+                return "The configured Gemini model is not available. Please update the model setting."
+            logger.error("Gemini API request failed: %s", exc)
+            return "The Gemini service could not answer the question right now. Please try again later."
+
+        if genai_errors is not None and isinstance(exc, genai_errors.ClientError):
+            logger.error("Gemini client error: %s", exc)
+            return "The Gemini service rejected the request. Please verify your configuration."
+
+        if any(token in error_message for token in ["api key", "authentication", "forbidden", "permission"]):
+            logger.error("Invalid Gemini API key: %s", exc)
+            return "The Gemini API key is invalid or missing. Please verify your configuration."
+
+        if any(token in error_message for token in ["network", "connection", "timeout", "temporarily", "unavailable"]):
+            logger.warning("Gemini network or timeout issue: %s", exc)
+            return "The Gemini service is currently unreachable. Please check your network connection and try again."
+
+        logger.exception("Unexpected Gemini error.")
+        return "The Gemini service could not answer the question right now. Please try again later."
 
     def _extract_response_text(self, response: Any) -> str:
         """Extract readable text from the Gemini response object."""
@@ -120,6 +165,7 @@ class GeminiClient:
             logger.debug("Unable to parse Gemini response candidates.", exc_info=True)
 
         if response is None:
-            raise GeminiAPIError("Gemini returned an empty response.")
+            logger.warning("Gemini returned an empty response.")
+            return "I couldn't generate a reliable answer from the provided resume context."
 
-        return str(response).strip()
+        return str(response).strip() or "I couldn't generate a reliable answer from the provided resume context."

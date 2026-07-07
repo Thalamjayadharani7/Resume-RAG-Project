@@ -18,18 +18,26 @@ class PromptBuilder:
         if not isinstance(user_question, str):
             raise TypeError("user_question must be a string.")
 
+        normalized_context = retrieved_context.strip()
+        if not normalized_context:
+            return (
+                "Answer the user's question using the retrieved context only. "
+                "If the answer is not available, return exactly: "
+                '"I couldn\'t find that information in the provided resume."'
+            )
+
         return (
             "System Instructions\n"
             f"{self.system_instructions}\n\n"
             "Retrieved Context\n"
-            f"{retrieved_context}\n\n"
+            f"{normalized_context}\n\n"
             "User Question\n"
-            f"{user_question}\n\n"
+            f"{user_question.strip()}\n\n"
             "Clear Answering Rules\n"
             "- Answer ONLY using the retrieved resume context.\n"
             "- Never use outside knowledge.\n"
             "- Never hallucinate.\n"
             "- Never guess.\n"
             "- If the answer is not available in the retrieved context, return exactly: "
-            '"The requested information is not available in the provided document."'
+            '"I couldn\'t find that information in the provided resume."'
         )
