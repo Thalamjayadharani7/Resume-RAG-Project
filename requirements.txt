@@ -1,0 +1,12 @@
+chromadb
+langchain
+langchain-community
+langchain-google-genai
+google-generativeai
+pypdf
+sentence-transformers
+streamlit
+python-dotenv
+pandas
+openpyxl
+ragas
