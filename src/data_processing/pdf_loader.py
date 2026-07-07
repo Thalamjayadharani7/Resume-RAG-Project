@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +57,21 @@ class PDFLoader:
                         text_parts.append(page_text)
 
                 text = "\n".join(text_parts).strip()
+                if not text:
+                    logger.warning("Skipping empty or unreadable PDF: %s", pdf_path.name)
+                    continue
+
                 documents.append(PDFDocument(filename=pdf_path.name, text=text))
                 logger.info("Loaded %s (%d characters)", pdf_path.name, len(text))
+            except (FileNotFoundError, PermissionError, ValueError, RuntimeError) as exc:
+                logger.warning("Skipped unreadable PDF %s: %s", pdf_path.name, exc)
             except Exception as exc:  # pragma: no cover - logging branch
                 logger.exception("Failed to extract text from %s: %s", pdf_path.name, exc)
 
         return documents
+
+    def list_pdf_files(self, pattern: str = "*.pdf") -> list[Path]:
+        """Return the available PDF file paths for the configured data directory."""
+        if not self.data_dir.exists():
+            return []
+        return sorted(path for path in self.data_dir.rglob(pattern) if path.is_file())
