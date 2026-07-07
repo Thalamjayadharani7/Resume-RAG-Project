@@ -1,31 +1,36 @@
+from __future__ import annotations
+
 import streamlit as st
 
-from src.rag.rag_pipeline import run_rag_pipeline
+from src.rag.rag_pipeline import RAGPipeline
 
 
 def main() -> None:
-    st.set_page_config(page_title="Resume RAG System", page_icon="📄", layout="centered")
-    st.title("Resume RAG System")
-    st.caption("Upload one or more resume PDFs and ask a question about them.")
+    st.set_page_config(page_title="Resume RAG", page_icon="📄", layout="wide")
+    st.title("Resume RAG Assistant")
 
-    uploaded_files = st.file_uploader(
-        "Upload resume PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-    )
-    question = st.text_input("Ask a question about the resume")
+    if "pipeline" not in st.session_state:
+        st.session_state.pipeline = RAGPipeline(data_dir="data")
 
-    if st.button("Generate Answer", type="primary"):
-        if not uploaded_files:
-            st.error("Please upload a resume document first.")
-        elif not question.strip():
-            st.error("Please enter a question.")
-        else:
-            with st.spinner("Analyzing the uploaded resume(s)..."):
-                answer = run_rag_pipeline(question=question, uploaded_files=uploaded_files)
+    pipeline = st.session_state.pipeline
 
-            st.subheader("Generated Response")
-            st.write(answer)
+    with st.sidebar:
+        st.header("Options")
+        resume_name = st.text_input("Resume filename (optional)", value="")
+        if st.button("Build index"):
+            with st.spinner("Indexing resumes..."):
+                indexed = pipeline.build_index(data_dir="data")
+            st.success(f"Indexed {len(indexed)} chunks.")
+
+    question = st.text_area("Ask a question about the resume", height=120)
+    if st.button("Ask") and question.strip():
+        with st.spinner("Searching the resume..."):
+            result = pipeline.answer_question(question, resume_name=resume_name or None)
+        st.subheader("Answer")
+        st.write(result["answer"])
+        if result.get("retrieved_context"):
+            with st.expander("Retrieved context"):
+                st.write(result["retrieved_context"])
 
 
 if __name__ == "__main__":

@@ -1,76 +1,89 @@
-from io import BytesIO
-from typing import List, Optional
+from __future__ import annotations
 
-try:
-    from pypdf import PdfReader
-except ImportError:  # pragma: no cover - optional dependency fallback
-    PdfReader = None
+import logging
+from typing import Any, Optional
 
-from src.rag.llm import generate_answer
-from src.rag.prompt import create_prompt
-from src.rag.retriever import retrieve_relevant_text
+from src.data_processing.chunking import TextChunker
+from src.data_processing.pdf_loader import PDFLoader
+from src.rag.llm import GeminiClient
+from src.rag.prompt import PromptBuilder
+from src.rag.retriever import Retriever
 
-
-def _extract_uploaded_bytes(uploaded_file) -> bytes:
-    if hasattr(uploaded_file, "getvalue"):
-        value = uploaded_file.getvalue()
-        if isinstance(value, bytes):
-            return value
-        if isinstance(value, bytearray):
-            return bytes(value)
-    if hasattr(uploaded_file, "read"):
-        try:
-            uploaded_file.seek(0)
-        except Exception:
-            pass
-        data = uploaded_file.read()
-        if isinstance(data, bytes):
-            return data
-        if isinstance(data, bytearray):
-            return bytes(data)
-    return b""
+logger = logging.getLogger(__name__)
 
 
-def _extract_text_from_bytes(file_bytes: bytes) -> str:
-    if not file_bytes:
-        return ""
+class RAGPipeline:
+    """Coordinate the Resume RAG flow from PDF ingestion to answer generation."""
 
-    if isinstance(file_bytes, str):
-        return file_bytes
+    def __init__(
+        self,
+        retriever: Optional[Retriever] = None,
+        prompt_builder: Optional[PromptBuilder] = None,
+        llm_client: Optional[GeminiClient] = None,
+        data_dir: Optional[str] = None,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+        top_k: int = 5,
+    ) -> None:
+        self.data_dir = data_dir
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.top_k = top_k
 
-    try:
-        if PdfReader is not None and b"%PDF" in file_bytes[:8]:
-            reader = PdfReader(BytesIO(file_bytes))
-            pages = [page.extract_text() or "" for page in reader.pages]
-            return "\n".join(page for page in pages if page).strip()
-    except Exception:
-        pass
+        self.retriever = retriever or Retriever(top_k=top_k)
+        self.prompt_builder = prompt_builder or PromptBuilder()
+        self.llm_client = llm_client
 
-    try:
-        return file_bytes.decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+    def list_resume_files(self, data_dir: Optional[str] = None) -> list[str]:
+        """Return the available PDF filenames in the configured data directory."""
+        loader = PDFLoader(data_dir=data_dir or self.data_dir)
+        return [pdf_path.name for pdf_path in loader.list_pdf_files()]
+
+    def build_index(self, data_dir: Optional[str] = None, pattern: str = "*.pdf") -> list[str]:
+        """Load PDFs, chunk them, embed them, and store them in the vector database."""
+        loader = PDFLoader(data_dir=data_dir or self.data_dir)
+        documents = loader.load_documents(pattern=pattern)
+        if not documents:
+            logger.warning("No resume documents were loaded for indexing.")
+            return []
+
+        chunker = TextChunker(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        chunks = chunker.chunk_documents(documents)
+        if not chunks:
+            logger.warning("No chunks were created from the loaded resumes.")
+            return []
+
+        return self.retriever.index_documents(chunks)
+
+    def _get_llm_client(self) -> GeminiClient:
+        if self.llm_client is None:
+            self.llm_client = GeminiClient()
+        return self.llm_client
+
+    def answer_question(self, question: str, resume_name: Optional[str] = None) -> dict[str, Any]:
+        """Retrieve relevant context, build a prompt, and return the generated answer."""
+        if not isinstance(question, str) or not question.strip():
+            raise ValueError("question must be a non-empty string")
+
+        retrieved_context = self.retriever.retrieve_context(question, resume_name=resume_name)
+        if not retrieved_context.strip():
+            answer = "I couldn't find that information in the provided resume."
+        else:
+            prompt = self.prompt_builder.build_prompt(retrieved_context, question)
+            answer = self._get_llm_client().generate_response(prompt)
+
+        return {
+            "question": question,
+            "retrieved_context": retrieved_context,
+            "answer": answer,
+        }
 
 
-def run_rag_pipeline(question: str, uploaded_files: Optional[List[object]] = None) -> str:
-    if not uploaded_files:
-        return "Please upload a resume document first."
-
+def run_rag_pipeline(question: str, uploaded_files: Optional[list[object]] = None) -> str:
+    """Compatibility wrapper for the indexed resume pipeline."""
     if not question or not str(question).strip():
         return "Please enter a question."
 
-    documents: List[str] = []
-    for uploaded_file in uploaded_files:
-        file_bytes = _extract_uploaded_bytes(uploaded_file)
-        text = _extract_text_from_bytes(file_bytes)
-        if text.strip():
-            documents.append(text)
-
-    if not documents:
-        return "The requested information is not available in the provided document."
-
-    context = retrieve_relevant_text(question, documents)
-    prompt = create_prompt(question, context)
-    answer = generate_answer(prompt=prompt, question=question, context=context)
-
-    return answer
+    pipeline = RAGPipeline(data_dir="data")
+    result = pipeline.answer_question(question)
+    return result["answer"]

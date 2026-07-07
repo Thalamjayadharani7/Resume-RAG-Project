@@ -87,7 +87,12 @@ class VectorStore:
 
         return ids
 
-    def similarity_search(self, query_embedding: Sequence[float], top_k: int = 5) -> list[dict[str, Any]]:
+    def similarity_search(
+        self,
+        query_embedding: Sequence[float],
+        top_k: int = 5,
+        where: Optional[dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
         """Find the most similar stored chunks for a query embedding."""
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero")
@@ -96,12 +101,16 @@ class VectorStore:
             self.create_collection()
 
         query_vector = [float(value) for value in query_embedding]
+        query_kwargs: dict[str, Any] = {
+            "query_embeddings": [query_vector],
+            "n_results": top_k,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where:
+            query_kwargs["where"] = where
+
         try:
-            results = self.collection.query(
-                query_embeddings=[query_vector],
-                n_results=top_k,
-                include=["documents", "metadatas", "distances"],
-            )
+            results = self.collection.query(**query_kwargs)
         except Exception as exc:  # pragma: no cover - logging branch
             logger.exception("Similarity search failed: %s", exc)
             raise

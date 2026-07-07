@@ -1,63 +1,74 @@
 # Resume-RAG-Project
 
 ## Overview
-Resume-RAG-Project is a Retrieval-Augmented Generation (RAG) application that generates interview questions from resume content using Google Gemini and LangChain.
+Resume-RAG-Project is a retrieval-augmented generation application for answering questions from resume PDFs using local embeddings and the Google Gemini API.
+
+## Architecture
+The pipeline flows as follows:
+
+PDF -> Chunking -> Embedding -> Vector Store -> Retriever -> Prompt Builder -> Gemini -> Answer
 
 ## Features
-- Upload resume in PDF format
-- Extract resume content
-- Generate interview questions
-- Compare generated questions with ground truth
-- Evaluate similarity score
+- Load one or more resume PDFs from the data directory
+- Chunk and embed resume content
+- Store embeddings in ChromaDB
+- Retrieve context for a user question
+- Generate answers using Gemini without hallucinating beyond the retrieved context
+- Handle missing files, empty folders, invalid API keys, and network issues gracefully
 
 ## Project Structure
-```
+```text
 Resume-RAG-Project/
-│── data/
-│── ground_truth/
-│── src/
-│── .env.example
-│── .gitignore
-│── main.py
-│── requirements.txt
-│── README.md
+├── data/
+├── ground_truth/
+├── src/
+│   ├── data_processing/
+│   ├── evaluation/
+│   ├── rag/
+│   └── ui/
+├── .env.example
+├── .gitignore
+├── main.py
+├── requirements.txt
+└── README.md
 ```
-
-## Requirements
-- Python 3.10+
-- Google Gemini API Key
 
 ## Installation
+1. Create and activate a Python virtual environment.
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Copy [.env.example](.env.example) to .env and fill in the values.
+4. Place one or more PDF resumes in the data folder.
+5. Run the CLI:
+   ```bash
+   python main.py
+   ```
 
-1. Clone the repository
-```bash
-git clone <repository-url>
-```
-
-2. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-3. Create a `.env` file
+## Environment Variables
 ```env
-GOOGLE_API_KEY=your_api_key
-MODEL_NAME=gemini-2.5-flash
-CHROMA_DB_PATH=./data/chroma_db
+GOOGLE_API_KEY=your_google_api_key_here
+GEMINI_MODEL_NAME=gemini-2.5-flash
+EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2
+CHROMA_DB_PATH=./.chromadb
+HF_HOME=./.cache/huggingface
+TOP_K=5
 ```
 
-4. Run the application
-```bash
-python main.py
-```
+## Sample Queries
+- What is the candidate's full name?
+- What are the candidate's technical skills?
+- Which projects mention Python?
 
-## Technologies Used
-- Python
-- LangChain
-- Google Gemini
-- ChromaDB
-- Streamlit
-- RAG
+## Dependencies
+- ChromaDB for vector storage
+- PyPDF for PDF extraction
+- SentenceTransformers for embeddings
+- python-dotenv for environment loading
+- google-genai for Gemini access
+- Streamlit for the optional UI
 
-## Note
-Do not upload the `.env` file to GitHub. Use `.env.example` as a reference.
+## Notes
+- Do not commit the .env file.
+- The application will return a friendly message when no relevant context is found or when Gemini is unavailable.
