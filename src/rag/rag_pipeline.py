@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-<<<<<<< HEAD
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None
-=======
 import logging
 from typing import Any, Optional
->>>>>>> 4d8246e09bc326a0ab46e4c52ea5f76b98a8010c
 
 from src.data_processing.chunking import TextChunker
 from src.data_processing.pdf_loader import PDFLoader
@@ -19,87 +12,6 @@ from src.rag.retriever import Retriever
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-def _extract_uploaded_bytes(uploaded_file) -> bytes:
-    if hasattr(uploaded_file, "getvalue"):
-        value = uploaded_file.getvalue()
-        if isinstance(value, (bytes, bytearray)):
-            return bytes(value)
-
-    if hasattr(uploaded_file, "read"):
-        try:
-            uploaded_file.seek(0)
-        except Exception:
-            pass
-
-        data = uploaded_file.read()
-        if isinstance(data, (bytes, bytearray)):
-            return bytes(data)
-
-    return b""
-
-
-def _extract_text_from_bytes(file_bytes: bytes) -> str:
-    if not file_bytes:
-        return ""
-
-    try:
-        if PdfReader is not None and b"%PDF" in file_bytes[:8]:
-            reader = PdfReader(BytesIO(file_bytes))
-            pages = [page.extract_text() or "" for page in reader.pages]
-            return "\n".join(pages).strip()
-    except Exception as e:
-        print("PDF Extraction Error:", e)
-
-    try:
-        return file_bytes.decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
-
-
-def run_rag_pipeline(question: str, uploaded_files: Optional[List[object]] = None) -> str:
-
-    if not uploaded_files:
-        return "Please upload a resume document first."
-
-    if not question.strip():
-        return "Please enter a question."
-
-    documents = []
-
-    for uploaded_file in uploaded_files:
-        text = _extract_text_from_bytes(
-            _extract_uploaded_bytes(uploaded_file)
-        )
-
-        if text.strip():
-            documents.append(text)
-
-    if not documents:
-        return "No text could be extracted from the uploaded PDF."
-
-    context = retrieve_relevant_text(question, documents)
-
-    print("=" * 50)
-    print("QUESTION")
-    print(question)
-    print("=" * 50)
-
-    print("=" * 50)
-    print("CONTEXT")
-    print(context)
-    print("=" * 50)
-
-    prompt = create_prompt(question, context)
-
-    answer = generate_answer(
-        prompt=prompt,
-        question=question,
-        context=context,
-    )
-
-    return answer
-=======
 class RAGPipeline:
     """Coordinate the Resume RAG flow from PDF ingestion to answer generation."""
 
@@ -123,24 +35,35 @@ class RAGPipeline:
         self.llm_client = llm_client
 
     def list_resume_files(self, data_dir: Optional[str] = None) -> list[str]:
-        """Return the available PDF filenames in the configured data directory."""
+        """Return the available PDF filenames."""
         loader = PDFLoader(data_dir=data_dir or self.data_dir)
         return [pdf_path.name for pdf_path in loader.list_pdf_files()]
 
-    def build_index(self, data_dir: Optional[str] = None, pattern: str = "*.pdf") -> list[str]:
-        """Load PDFs, chunk them, embed them, and store them in the vector database."""
+    def build_index(
+        self,
+        data_dir: Optional[str] = None,
+        pattern: str = "*.pdf",
+    ) -> list[str]:
+        """Load PDFs, split into chunks, and index them."""
         loader = PDFLoader(data_dir=data_dir or self.data_dir)
         documents = loader.load_documents(pattern=pattern)
+
         if not documents:
-            logger.warning("No resume documents were loaded for indexing.")
+            logger.warning("No resume documents found.")
             return []
 
-        chunker = TextChunker(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        chunker = TextChunker(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+        )
+
         chunks = chunker.chunk_documents(documents)
+
         if not chunks:
-            logger.warning("No chunks were created from the loaded resumes.")
+            logger.warning("No chunks created.")
             return []
 
+        self.retriever.vector_store.reset_collection()
         return self.retriever.index_documents(chunks)
 
     def _get_llm_client(self) -> GeminiClient:
@@ -148,16 +71,27 @@ class RAGPipeline:
             self.llm_client = GeminiClient()
         return self.llm_client
 
-    def answer_question(self, question: str, resume_name: Optional[str] = None) -> dict[str, Any]:
-        """Retrieve relevant context, build a prompt, and return the generated answer."""
-        if not isinstance(question, str) or not question.strip():
-            raise ValueError("question must be a non-empty string")
+    def answer_question(
+        self,
+        question: str,
+        resume_name: Optional[str] = None,
+    ) -> dict[str, Any]:
 
-        retrieved_context = self.retriever.retrieve_context(question, resume_name=resume_name)
+        if not question.strip():
+            raise ValueError("Question cannot be empty.")
+
+        retrieved_context = self.retriever.retrieve_context(
+            question,
+            resume_name=resume_name,
+        )
+
         if not retrieved_context.strip():
-            answer = "I couldn't find that information in the provided resume."
+            answer = "I couldn't find that information in the retrieved resume."
         else:
-            prompt = self.prompt_builder.build_prompt(retrieved_context, question)
+            prompt = self.prompt_builder.build_prompt(
+                retrieved_context,
+                question,
+            )
             answer = self._get_llm_client().generate_response(prompt)
 
         return {
@@ -167,12 +101,19 @@ class RAGPipeline:
         }
 
 
-def run_rag_pipeline(question: str, uploaded_files: Optional[list[object]] = None) -> str:
-    """Compatibility wrapper for the indexed resume pipeline."""
-    if not question or not str(question).strip():
+def run_rag_pipeline(
+    question: str,
+    uploaded_files: Optional[list[object]] = None,
+) -> str:
+    """
+    Compatibility wrapper.
+    """
+
+    if not question.strip():
         return "Please enter a question."
 
     pipeline = RAGPipeline(data_dir="data")
+
     result = pipeline.answer_question(question)
+
     return result["answer"]
->>>>>>> 4d8246e09bc326a0ab46e4c52ea5f76b98a8010c

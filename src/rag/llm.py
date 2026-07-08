@@ -47,7 +47,7 @@ class GeminiClient:
         self,
         model_name: str | None = None,
         env_path: str | None = None,
-    , timeout_seconds: int = 30) -> None:
+        timeout_seconds: int = 30) -> None:
         """Initialize the Gemini client and load credentials from the environment."""
         self.model_name = (model_name or os.getenv("GEMINI_MODEL_NAME", os.getenv("MODEL_NAME", "gemini-2.5-flash"))).strip()
         self.env_path = env_path
@@ -83,9 +83,6 @@ class GeminiClient:
         except Exception as exc:
             logger.exception("Failed to initialize Gemini client.")
             raise GeminiAPIError(f"Failed to initialize Gemini client: {exc}") from exc
-
-        except Exception as e:
-            raise GeminiAPIError(f"Unable to initialize Gemini model: {e}")
 
     def generate_response(self, prompt: str) -> str:
         """Send a prompt to Gemini and return the generated text response."""

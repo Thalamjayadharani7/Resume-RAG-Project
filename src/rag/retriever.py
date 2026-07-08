@@ -11,10 +11,6 @@ from src.data_processing.vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-def retrieve_relevant_text(question: str, documents: List[str]) -> str:
-
-=======
 class Retriever:
     """Embed queries and retrieve relevant context from the vector store."""
 
@@ -37,51 +33,135 @@ class Retriever:
         return self.vector_store.add_documents(embedded_chunks)
 
     def _embed_query(self, question: str) -> list[float]:
-        """Generate an embedding for a user question using the existing embedding model."""
+        """Generate an embedding for a user question."""
         if not isinstance(question, str) or not question.strip():
             raise ValueError("question must be a non-empty string")
 
         model = self.embedding_generator.load_model()
-        embeddings = model.encode([question], convert_to_numpy=False, normalize_embeddings=True)
+        embeddings = model.encode(
+            [question],
+            convert_to_numpy=False,
+            normalize_embeddings=True,
+        )
         return [float(value) for value in embeddings[0]]
 
-    def retrieve_context(self, question: str, top_k: Optional[int] = None, resume_name: Optional[str] = None) -> str:
-        """Retrieve the most relevant chunks and join them into prompt-ready context."""
+    def _normalize_name(self, value: Optional[str]) -> str:
+        if not value:
+            return ""
+        return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+    def _matches_resume_name(self, candidate_value: Optional[str], expected_name: Optional[str]) -> bool:
+        if not candidate_value or not expected_name:
+            return False
+
+        left = self._normalize_name(candidate_value)
+        right = self._normalize_name(expected_name)
+        if not left or not right:
+            return False
+
+        return (
+            left == right
+            or left.startswith(right)
+            or right.startswith(left)
+            or right in left
+            or left in right
+        )
+
+    def _infer_resume_name(self, question: str, resume_name: Optional[str]) -> Optional[str]:
+        if resume_name:
+            return resume_name
+
+        question_terms = [term for term in re.findall(r"[A-Za-z]+", question) if len(term) > 2]
+        for metadata in self.vector_store.get_all_metadata():
+            candidate_name = metadata.get("candidate_name")
+            filename = metadata.get("filename")
+            if self._matches_resume_name(candidate_name, question):
+                return candidate_name
+            if self._matches_resume_name(filename, question):
+                return filename
+            for term in question_terms:
+                if self._matches_resume_name(candidate_name, term):
+                    return candidate_name
+                if self._matches_resume_name(filename, term):
+                    return filename
+        return None
+
+    def retrieve_context(
+        self,
+        question: str,
+        top_k: Optional[int] = None,
+        resume_name: Optional[str] = None,
+    ) -> str:
+        """Retrieve the most relevant chunks."""
+
         if not isinstance(question, str) or not question.strip():
             raise ValueError("question must be a non-empty string")
 
         query_embedding = self._embed_query(question)
+
+        filter_name = self._infer_resume_name(question, resume_name)
         where_clause = None
-        if resume_name:
-            where_clause = {"filename": resume_name}
+        if filter_name:
+            where_clause = {
+                "$or": [
+                    {"candidate_name": {"$eq": filter_name}},
+                    {"filename": {"$eq": filter_name}},
+                ]
+            }
 
         results = self.vector_store.similarity_search(
             query_embedding=query_embedding,
-            top_k=top_k or self.top_k,
+            top_k=max(top_k or self.top_k, 20),
             where=where_clause,
         )
 
-        context_parts: list[str] = []
-        seen_context: set[str] = set()
-        for result in results:
-            document_text = result.get("document")
-            if isinstance(document_text, str):
-                cleaned = document_text.strip()
-                if cleaned and cleaned not in seen_context:
-                    context_parts.append(cleaned)
-                    seen_context.add(cleaned)
+        context_parts = []
+        seen = set()
 
-        logger.info("Retrieved %d context chunk(s) for question '%s'", len(context_parts), question)
+        if filter_name:
+            filtered_results = [
+                result
+                for result in results
+                if self._matches_resume_name((result.get("metadata") or {}).get("candidate_name"), filter_name)
+                or self._matches_resume_name((result.get("metadata") or {}).get("filename"), filter_name)
+            ]
+        else:
+            filtered_results = results
+
+        for result in filtered_results[: top_k or self.top_k]:
+            text = result.get("document")
+            if isinstance(text, str):
+                text = text.strip()
+                if text and text not in seen:
+                    context_parts.append(text)
+                    seen.add(text)
+
+        logger.info(
+            "Retrieved %d chunk(s) for question '%s'",
+            len(context_parts),
+            question,
+        )
+
         return "\n\n".join(context_parts)
 
-    def retrieve(self, question: str, top_k: Optional[int] = None, resume_name: Optional[str] = None) -> str:
-        """Compatibility helper returning prompt-ready context for the question."""
-        return self.retrieve_context(question=question, top_k=top_k, resume_name=resume_name)
+    def retrieve(
+        self,
+        question: str,
+        top_k: Optional[int] = None,
+        resume_name: Optional[str] = None,
+    ) -> str:
+        return self.retrieve_context(
+            question=question,
+            top_k=top_k,
+            resume_name=resume_name,
+        )
 
 
 def retrieve_relevant_text(question: str, documents: Sequence[str]) -> str:
-    """Return the most relevant document excerpt for a simple uploaded-document workflow."""
->>>>>>> 4d8246e09bc326a0ab46e4c52ea5f76b98a8010c
+    """
+    Compatibility helper for uploaded-document workflow.
+    """
+
     if not documents:
         return ""
 
@@ -91,44 +171,36 @@ def retrieve_relevant_text(question: str, documents: Sequence[str]) -> str:
         if len(word) > 2
     ]
 
-    best_doc = documents[0]
+    best_document = documents[0]
     best_score = -1
 
     for document in documents:
-
         score = 0
-
-        doc_lower = document.lower()
+        lower = document.lower()
 
         for term in question_terms:
-            score += doc_lower.count(term)
+            score += lower.count(term)
 
         if score > best_score:
             best_score = score
-            best_doc = document
+            best_document = document
 
     if best_score <= 0:
-        return best_doc
+        return best_document
 
-    lines = best_doc.splitlines()
+    lines = [
+        line.strip()
+        for line in best_document.splitlines()
+        if line.strip()
+    ]
 
-    matched = []
+    relevant_lines = [
+        line
+        for line in lines
+        if any(term in line.lower() for term in question_terms)
+    ]
 
-<<<<<<< HEAD
-    for line in lines:
-
-        lower = line.lower()
-=======
-    lines = [line.strip() for line in best_document.splitlines() if line.strip()]
-    relevant_lines = [line for line in lines if any(term in line.lower() for term in question_terms)]
     if relevant_lines:
         return "\n".join(relevant_lines[:5])
->>>>>>> 4d8246e09bc326a0ab46e4c52ea5f76b98a8010c
 
-        if any(term in lower for term in question_terms):
-            matched.append(line.strip())
-
-    if matched:
-        return "\n".join(matched[:20])
-
-    return best_doc
+    return best_document

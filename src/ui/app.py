@@ -5,72 +5,65 @@ import streamlit as st
 from src.rag.rag_pipeline import RAGPipeline
 
 
-<<<<<<< HEAD
-def main():
-
+def main() -> None:
     st.set_page_config(
         page_title="Resume RAG",
         page_icon="📄",
-        layout="centered",
+        layout="wide",
     )
 
-    st.title("Resume RAG System")
+    st.title("📄 Resume RAG Assistant")
+    st.markdown("Ask questions about one or more resumes using Retrieval-Augmented Generation (RAG).")
 
-    uploaded_files = st.file_uploader(
-        "Upload Resume PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-    )
-
-    question = st.text_input("Ask a question")
-
-    if st.button("Generate Answer"):
-
-        if not uploaded_files:
-            st.error("Please upload a resume.")
-            return
-
-        if not question.strip():
-            st.error("Please enter a question.")
-            return
-
-        with st.spinner("Generating answer..."):
-
-            answer = run_rag_pipeline(
-                question=question,
-                uploaded_files=uploaded_files,
-            )
-
-        st.subheader("Generated Response")
-        st.write(answer)
-=======
-def main() -> None:
-    st.set_page_config(page_title="Resume RAG", page_icon="📄", layout="wide")
-    st.title("Resume RAG Assistant")
-
+    # Initialize pipeline only once
     if "pipeline" not in st.session_state:
         st.session_state.pipeline = RAGPipeline(data_dir="data")
 
     pipeline = st.session_state.pipeline
 
+    # Sidebar
     with st.sidebar:
         st.header("Options")
-        resume_name = st.text_input("Resume filename (optional)", value="")
-        if st.button("Build index"):
-            with st.spinner("Indexing resumes..."):
-                indexed = pipeline.build_index(data_dir="data")
-            st.success(f"Indexed {len(indexed)} chunks.")
 
-    question = st.text_area("Ask a question about the resume", height=120)
-    if st.button("Ask") and question.strip():
-        with st.spinner("Searching the resume..."):
-            result = pipeline.answer_question(question, resume_name=resume_name or None)
+        resume_name = st.text_input(
+            "Resume filename (optional)",
+            placeholder="e.g. jaya.pdf",
+        )
+
+        if st.button("Build Index"):
+            with st.spinner("Building vector index..."):
+                indexed = pipeline.build_index(data_dir="data")
+
+            st.success(f"Indexed {len(indexed)} chunks successfully!")
+
+    st.divider()
+
+    # Question Input
+    question = st.text_area(
+        "Ask a question",
+        placeholder="Example: What are the candidate's skills?",
+        height=120,
+    )
+
+    if st.button("Generate Answer"):
+
+        if not question.strip():
+            st.warning("Please enter a question.")
+            st.stop()
+
+        with st.spinner("Searching resumes..."):
+
+            result = pipeline.answer_question(
+                question=question,
+                resume_name=resume_name.strip() or None,
+            )
+
         st.subheader("Answer")
         st.write(result["answer"])
+
         if result.get("retrieved_context"):
-            with st.expander("Retrieved context"):
+            with st.expander("Retrieved Context"):
                 st.write(result["retrieved_context"])
->>>>>>> 4d8246e09bc326a0ab46e4c52ea5f76b98a8010c
 
 
 if __name__ == "__main__":

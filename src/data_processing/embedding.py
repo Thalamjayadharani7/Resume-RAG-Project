@@ -28,6 +28,8 @@ class EmbeddedChunk:
     chunk_id: str
     chunk_text: str
     embedding_vector: list[float]
+    candidate_name: str | None = None
+    page_number: int | None = None
 
 
 class EmbeddingGenerator:
@@ -77,6 +79,8 @@ class EmbeddingGenerator:
                             chunk_id=chunk.chunk_id,
                             chunk_text=chunk.chunk_text,
                             embedding_vector=[float(value) for value in embedding],
+                            candidate_name=chunk.candidate_name,
+                            page_number=chunk.page_number,
                         )
                     )
         except Exception as exc:  # pragma: no cover - logging branch

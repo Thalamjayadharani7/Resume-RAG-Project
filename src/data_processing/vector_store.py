@@ -59,6 +59,41 @@ class VectorStore:
 
         return self.collection
 
+    def reset_collection(self) -> Any:
+        """Delete any existing collection state and recreate an empty collection."""
+        if chromadb is None:
+            raise ImportError("chromadb is required to store embeddings.")
+
+        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        try:
+            if hasattr(chromadb, "PersistentClient"):
+                self.client = chromadb.PersistentClient(path=str(self.persist_directory))
+            else:
+                self.client = chromadb.Client()
+        except Exception as exc:  # pragma: no cover - logging branch
+            logger.exception("Failed to initialize ChromaDB client: %s", exc)
+            raise
+
+        try:
+            self.client.delete_collection(name=self.collection_name)
+        except Exception:
+            logger.debug("Collection '%s' did not exist before reset", self.collection_name)
+
+        self.collection = self.client.get_or_create_collection(
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        return self.collection
+
+    def get_all_metadata(self) -> list[dict[str, Any]]:
+        """Return all collection metadata entries."""
+        if self.collection is None:
+            self.create_collection()
+
+        result = self.collection.get(include=["metadatas"])
+        metadatas = result.get("metadatas", [])
+        return [metadata if isinstance(metadata, dict) else {} for metadata in metadatas]
+
     def add_documents(self, documents: Sequence[EmbeddedChunk]) -> list[str]:
         """Add embedded chunks to the ChromaDB collection."""
         if not documents:
@@ -69,7 +104,12 @@ class VectorStore:
 
         ids = [f"{document.filename}:{document.chunk_id}" for document in documents]
         metadatas = [
-            {"filename": document.filename, "chunk_id": document.chunk_id}
+            {
+                "filename": document.filename,
+                "chunk_id": document.chunk_id,
+                "candidate_name": document.candidate_name or "",
+                "page_number": document.page_number if document.page_number is not None else 1,
+            }
             for document in documents
         ]
 

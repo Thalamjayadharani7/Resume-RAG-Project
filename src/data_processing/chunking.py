@@ -17,6 +17,8 @@ class TextChunk:
     filename: str
     chunk_id: str
     chunk_text: str
+    candidate_name: str | None = None
+    page_number: int | None = None
 
 
 class TextChunker:
@@ -49,15 +51,20 @@ class TextChunker:
                 logger.warning("Skipping empty document: %s", document.filename)
                 continue
 
-            for index, chunk_text in enumerate(self._deduplicate_chunks(self._split_text(document.text))):
-                chunk_id = f"{document.filename}__{index}"
-                chunks.append(
-                    TextChunk(
-                        filename=document.filename,
-                        chunk_id=chunk_id,
-                        chunk_text=chunk_text,
+            page_sources = document.page_texts or [(1, document.text)]
+            for page_number, page_text in page_sources:
+                page_chunks = self._deduplicate_chunks(self._split_text(page_text))
+                for index, chunk_text in enumerate(page_chunks):
+                    chunk_id = f"{document.filename}__{page_number}__{index}"
+                    chunks.append(
+                        TextChunk(
+                            filename=document.filename,
+                            chunk_id=chunk_id,
+                            chunk_text=chunk_text,
+                            candidate_name=document.candidate_name,
+                            page_number=page_number,
+                        )
                     )
-                )
 
         return chunks
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -19,6 +20,8 @@ class PDFDocument:
 
     filename: str
     text: str
+    page_texts: list[tuple[int, str]]
+    candidate_name: Optional[str] = None
 
 
 class PDFLoader:
@@ -28,6 +31,31 @@ class PDFLoader:
         default_dir = Path(__file__).resolve().parents[2] / "data"
         self.data_dir = Path(data_dir or default_dir).resolve()
         logger.info("Initialized PDFLoader with data directory: %s", self.data_dir)
+
+    @staticmethod
+    def _extract_candidate_name(text: str, filename: str) -> Optional[str]:
+        """Infer a likely candidate name from the document text or filename."""
+        if not text:
+            return None
+
+        for line in text.splitlines():
+            candidate = re.sub(r"\s+", " ", line.strip(" -\t")).strip()
+            if not candidate:
+                continue
+
+            lowered = candidate.lower()
+            if any(token in lowered for token in ["professional summary", "education", "skills", "experience", "contact", "email", "phone", "linkedin", "github", "resume", "profile", "cv"]):
+                continue
+            if len(candidate.split()) > 4:
+                continue
+            if re.fullmatch(r"[A-Za-z][A-Za-z .'-]{1,40}", candidate):
+                return candidate.title()
+
+        stem = Path(filename).stem
+        fallback = re.sub(r"[_\-\.]+", " ", stem).strip()
+        if fallback and fallback.lower() not in {"resume", "profile", "cv"}:
+            return re.sub(r"\s+", " ", fallback).title()
+        return None
 
     def load_documents(self, pattern: str = "*.pdf") -> list[PDFDocument]:
         """Load all PDF files from the configured directory and extract text."""
@@ -50,18 +78,28 @@ class PDFLoader:
 
             try:
                 reader = PdfReader(str(pdf_path))
+                page_texts: list[tuple[int, str]] = []
                 text_parts: list[str] = []
-                for page in reader.pages:
+                for page_number, page in enumerate(reader.pages, start=1):
                     page_text = page.extract_text() or ""
                     if page_text:
+                        page_texts.append((page_number, page_text))
                         text_parts.append(page_text)
 
-                text = "\n".join(text_parts).strip()
+                text = "\n".join(page_text for _, page_text in page_texts).strip()
                 if not text:
                     logger.warning("Skipping empty or unreadable PDF: %s", pdf_path.name)
                     continue
 
-                documents.append(PDFDocument(filename=pdf_path.name, text=text))
+                candidate_name = self._extract_candidate_name(text, pdf_path.name)
+                documents.append(
+                    PDFDocument(
+                        filename=pdf_path.name,
+                        text=text,
+                        page_texts=page_texts,
+                        candidate_name=candidate_name,
+                    )
+                )
                 logger.info("Loaded %s (%d characters)", pdf_path.name, len(text))
             except (FileNotFoundError, PermissionError, ValueError, RuntimeError) as exc:
                 logger.warning("Skipped unreadable PDF %s: %s", pdf_path.name, exc)
