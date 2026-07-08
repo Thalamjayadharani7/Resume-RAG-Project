@@ -85,7 +85,7 @@ class Retriever:
                 if self._matches_resume_name(filename, term):
                     return filename
         return None
-
+     
     def retrieve_context(
         self,
         question: str,
@@ -100,6 +100,7 @@ class Retriever:
         query_embedding = self._embed_query(question)
 
         filter_name = self._infer_resume_name(question, resume_name)
+
         where_clause = None
         if filter_name:
             where_clause = {
@@ -111,30 +112,39 @@ class Retriever:
 
         results = self.vector_store.similarity_search(
             query_embedding=query_embedding,
-            top_k=max(top_k or self.top_k, 20),
+            top_k=20,
             where=where_clause,
         )
 
-        context_parts = []
-        seen = set()
-
         if filter_name:
-            filtered_results = [
-                result
-                for result in results
-                if self._matches_resume_name((result.get("metadata") or {}).get("candidate_name"), filter_name)
-                or self._matches_resume_name((result.get("metadata") or {}).get("filename"), filter_name)
+            results = [
+                r for r in results
+                if self._matches_resume_name(
+                    (r.get("metadata") or {}).get("candidate_name"),
+                    filter_name,
+                )
+                or self._matches_resume_name(
+                    (r.get("metadata") or {}).get("filename"),
+                    filter_name,
+                )
             ]
-        else:
-            filtered_results = results
 
-        for result in filtered_results[: top_k or self.top_k]:
-            text = result.get("document")
-            if isinstance(text, str):
-                text = text.strip()
-                if text and text not in seen:
-                    context_parts.append(text)
-                    seen.add(text)
+        # Sort chunks in resume order
+        results.sort(
+            key=lambda r: (
+                (r.get("metadata") or {}).get("page_number", 1),
+                (r.get("metadata") or {}).get("chunk_id", ""),
+            )
+        )
+
+        seen = set()
+        context_parts = []
+
+        for result in results:
+            text = result.get("document", "").strip()
+            if text and text not in seen:
+                context_parts.append(text)
+                seen.add(text)
 
         logger.info(
             "Retrieved %d chunk(s) for question '%s'",

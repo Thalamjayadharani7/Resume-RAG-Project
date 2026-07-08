@@ -34,27 +34,93 @@ class PDFLoader:
 
     @staticmethod
     def _extract_candidate_name(text: str, filename: str) -> Optional[str]:
-        """Infer a likely candidate name from the document text or filename."""
-        if not text:
-            return None
+        """Infer candidate name from resume text or filename."""
+
+        # ---------- 1. Try to extract from filename ----------
+        stem = Path(filename).stem
+
+        # Remove common resume words
+        stem = re.sub(
+            r"(?i)\b(resume|profile|cv|sample|b\.?tech|btech)\b",
+            "",
+            stem,
+        )
+
+        # Remove numbers and special characters
+        stem = re.sub(r"\(.*?\)", " ", stem)
+        stem = re.sub(r"\d+", " ", stem)
+        stem = re.sub(r"[_\-.]+", " ", stem)
+        stem = re.sub(r"\s+", " ", stem).strip()
+
+        words = [
+            w.title()
+            for w in stem.split()
+            if len(w) > 1
+            and w.lower()
+            not in {
+                "resume",
+                "profile",
+                "sample",
+                "b",
+                "tech",
+                "csd",
+                "data",
+                "science",
+            }
+        ]
+
+        # If filename contains 2-4 words, use it directly
+        if 2 <= len(words) <= 4:
+            return " ".join(words)
+
+        # ---------- 2. Search inside PDF ----------
+        ignore_words = {
+            "resume",
+            "career objective",
+            "professional summary",
+            "education",
+            "skills",
+            "technical skills",
+            "experience",
+            "projects",
+            "project",
+            "prediction",
+            "certificates",
+            "languages",
+            "contact",
+            "email",
+            "phone",
+            "linkedin",
+            "github",
+            "objective",
+            "declaration",
+        }
 
         for line in text.splitlines():
-            candidate = re.sub(r"\s+", " ", line.strip(" -\t")).strip()
+
+            candidate = re.sub(r"\s+", " ", line.strip()).strip()
+
             if not candidate:
                 continue
 
-            lowered = candidate.lower()
-            if any(token in lowered for token in ["professional summary", "education", "skills", "experience", "contact", "email", "phone", "linkedin", "github", "resume", "profile", "cv"]):
+            lower = candidate.lower()
+
+            if any(word in lower for word in ignore_words):
                 continue
+
+            if "@" in candidate:
+                continue
+
+            if any(ch.isdigit() for ch in candidate):
+                continue
+
             if len(candidate.split()) > 4:
                 continue
-            if re.fullmatch(r"[A-Za-z][A-Za-z .'-]{1,40}", candidate):
+
+            if re.fullmatch(r"[A-Za-z .'-]{3,50}", candidate):
                 return candidate.title()
 
-        stem = Path(filename).stem
-        fallback = re.sub(r"[_\-\.]+", " ", stem).strip()
-        if fallback and fallback.lower() not in {"resume", "profile", "cv"}:
-            return re.sub(r"\s+", " ", fallback).title()
+        # ---------- 3. Final fallback ----------
         return None
 
     def load_documents(self, pattern: str = "*.pdf") -> list[PDFDocument]:
