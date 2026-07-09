@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import Optional, Sequence
 
 from src.data_processing.chunking import TextChunk
@@ -50,40 +51,127 @@ class Retriever:
             return ""
         return re.sub(r"[^a-z0-9]+", "", str(value).lower())
 
-    def _matches_resume_name(self, candidate_value: Optional[str], expected_name: Optional[str]) -> bool:
+    def _name_score(self, candidate_value: Optional[str], expected_name: Optional[str]) -> float:
         if not candidate_value or not expected_name:
-            return False
+            return 0.0
 
         left = self._normalize_name(candidate_value)
         right = self._normalize_name(expected_name)
         if not left or not right:
-            return False
+            return 0.0
 
-        return (
-            left == right
-            or left.startswith(right)
-            or right.startswith(left)
-            or right in left
-            or left in right
-        )
+        if left == right:
+            return 1.0
+        if left.startswith(right) or right.startswith(left):
+            return 0.95
+        if right in left or left in right:
+            return 0.9
+
+        sequence_score = SequenceMatcher(None, left, right).ratio()
+        left_tokens = set(left)
+        right_tokens = set(right)
+        if left_tokens and right_tokens:
+            overlap = len(left_tokens & right_tokens)
+            token_score = overlap / max(1, len(right_tokens))
+        else:
+            token_score = 0.0
+
+        return max(token_score, sequence_score)
+
+    def _matches_resume_name(self, candidate_value: Optional[str], expected_name: Optional[str]) -> bool:
+        return self._name_score(candidate_value, expected_name) >= 0.55
+
+    def _extract_question_terms(self, question: str) -> list[str]:
+        stop_words = {
+            "what",
+            "which",
+            "where",
+            "when",
+            "why",
+            "how",
+            "tell",
+            "me",
+            "about",
+            "the",
+            "a",
+            "an",
+            "are",
+            "is",
+            "was",
+            "were",
+            "do",
+            "did",
+            "does",
+            "can",
+            "could",
+            "skills",
+            "skill",
+            "project",
+            "projects",
+            "work",
+            "worked",
+            "working",
+            "resume",
+            "candidate",
+            "cv",
+            "experience",
+            "education",
+            "contact",
+            "details",
+            "information",
+            "give",
+            "show",
+            "list",
+            "for",
+            "with",
+            "and",
+            "of",
+            "on",
+            "in",
+            "my",
+            "your",
+            "his",
+            "her",
+            "their",
+            "this",
+            "that",
+            "these",
+            "those",
+        }
+        return [
+            term.lower()
+            for term in re.findall(r"[A-Za-z]+", question)
+            if len(term) > 2 and term.lower() not in stop_words
+        ]
+
+    def _find_best_metadata_match(self, query_value: str, metadata_items: Sequence[dict[str, object]]) -> Optional[str]:
+        best_name: Optional[str] = None
+        best_score = 0.0
+        for metadata in metadata_items:
+            for candidate_value in (metadata.get("candidate_name"), metadata.get("filename")):
+                if not candidate_value:
+                    continue
+                score = self._name_score(query_value.lower(), str(candidate_value).lower())
+                if score > best_score:
+                    best_score = score
+                    best_name = str(candidate_value)
+        if best_score >= 0.55:
+            return best_name
+        return None
 
     def _infer_resume_name(self, question: str, resume_name: Optional[str]) -> Optional[str]:
+        metadata_items = list(self.vector_store.get_all_metadata())
         if resume_name:
-            return resume_name
+            resolved_name = self._find_best_metadata_match(str(resume_name), metadata_items)
+            if resolved_name:
+                return resolved_name
+            return str(resume_name)
 
-        question_terms = [term for term in re.findall(r"[A-Za-z]+", question) if len(term) > 2]
-        for metadata in self.vector_store.get_all_metadata():
-            candidate_name = metadata.get("candidate_name")
-            filename = metadata.get("filename")
-            if self._matches_resume_name(candidate_name, question):
-                return candidate_name
-            if self._matches_resume_name(filename, question):
-                return filename
-            for term in question_terms:
-                if self._matches_resume_name(candidate_name, term):
-                    return candidate_name
-                if self._matches_resume_name(filename, term):
-                    return filename
+        question_terms = self._extract_question_terms(question)
+        for term in question_terms:
+            resolved_name = self._find_best_metadata_match(term, metadata_items)
+            if resolved_name:
+                return resolved_name
         return None
      
     def retrieve_context(
@@ -103,12 +191,7 @@ class Retriever:
 
         where_clause = None
         if filter_name:
-            where_clause = {
-                "$or": [
-                    {"candidate_name": {"$eq": filter_name}},
-                    {"filename": {"$eq": filter_name}},
-                ]
-            }
+            where_clause = {"candidate_name": filter_name}
 
         results = self.vector_store.similarity_search(
             query_embedding=query_embedding,

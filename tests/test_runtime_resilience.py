@@ -119,7 +119,40 @@ class RuntimeResilienceTests(unittest.TestCase):
         retriever.retrieve_context("What are Dharani's skills?", resume_name="Dharani")
 
         self.assertIsNotNone(fake_store.last_where)
-        self.assertIn("$or", str(fake_store.last_where))
+        self.assertEqual(fake_store.last_where, {"candidate_name": "Dharani"})
+
+    def test_retriever_uses_fuzzy_candidate_name_match(self):
+        class FakeVectorStore:
+            def __init__(self):
+                self.last_where = None
+                self.metadata = [
+                    {"candidate_name": "Thalam Jaya Dharani", "filename": "sample resume.pdf"},
+                    {"candidate_name": "Rohitha Mareddy", "filename": "Rohitha_Mareddy_Resume.pdf"},
+                ]
+
+            def create_collection(self):
+                return None
+
+            def get_all_metadata(self):
+                return self.metadata
+
+            def similarity_search(self, query_embedding, top_k=5, where=None):
+                self.last_where = where
+                return [
+                    {"document": "Dharani skills", "metadata": {"candidate_name": "Thalam Jaya Dharani", "filename": "sample resume.pdf"}}
+                ]
+
+        class FakeEmbeddingGenerator:
+            def load_model(self):
+                return type("Model", (), {"encode": lambda self, texts, convert_to_numpy, normalize_embeddings: [[0.1, 0.2] for _ in texts]})()
+
+        fake_store = FakeVectorStore()
+        retriever = Retriever(embedding_generator=FakeEmbeddingGenerator(), vector_store=fake_store)
+
+        context = retriever.retrieve_context("What are Dharani's skills?")
+
+        self.assertIn("Dharani skills", context)
+        self.assertEqual(fake_store.last_where, {"candidate_name": "Thalam Jaya Dharani"})
 
     def test_main_exits_cleanly_when_input_is_missing(self):
         class DummyPipeline:

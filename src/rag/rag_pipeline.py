@@ -57,6 +57,10 @@ class RAGPipeline:
             chunk_overlap=self.chunk_overlap,
         )
 
+        for document in documents:
+            if not (document.candidate_name or "").strip():
+                document.candidate_name = PDFLoader._extract_candidate_name(document.text, document.filename)
+
         chunks = chunker.chunk_documents(documents)
 
         if not chunks:

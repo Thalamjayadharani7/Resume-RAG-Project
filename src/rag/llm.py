@@ -7,12 +7,12 @@ from typing import Any
 from dotenv import load_dotenv
 
 try:
-    from google import genai
-    from google.genai import errors as genai_errors
-except ImportError as exc:  # pragma: no cover - environment-specific
-    genai = None
-    genai_errors = None
-    _IMPORT_ERROR = exc
+   
+    from openai import OpenAI
+except ImportError as exc:
+    raise ImportError(
+        "Please install openai using: pip install openai"
+    ) from exc
 else:
     _IMPORT_ERROR = None
 
@@ -40,16 +40,19 @@ class GeminiRateLimitError(GeminiClientError):
 
 
 class GeminiClient:
-    """Client for communicating with Google's Gemini language model."""
-
-
+    """Client for communicating with OpenRouter language models."""
     def __init__(
         self,
         model_name: str | None = None,
         env_path: str | None = None,
         timeout_seconds: int = 30) -> None:
         """Initialize the Gemini client and load credentials from the environment."""
-        self.model_name = (model_name or os.getenv("GEMINI_MODEL_NAME", os.getenv("MODEL_NAME", "gemini-2.5-flash"))).strip()
+        self.model_name = (
+            model_name or os.getenv(
+                "MODEL_NAME",
+                "meta-llama/llama-3.3-70b-instruct"
+            )
+        ).strip()
         self.env_path = env_path
         self.timeout_seconds = timeout_seconds
         self.api_key = self._load_api_key()
@@ -66,102 +69,61 @@ class GeminiClient:
         else:
             load_dotenv()
 
-        api_key = os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         if not api_key:
-            logger.error("GOOGLE_API_KEY is missing.")
+            logger.error("OPENROUTER_API_KEY is missing.")
             return ""
         return api_key
 
-    def _initialize_model(self) -> None:
-        """Configure the Gemini SDK and initialize the client."""
-        if genai is None:
-            raise GeminiAPIError("The google-genai package is not installed. Install the dependency to use Gemini.") from _IMPORT_ERROR
-
+    def _initialize_model(self):
         try:
-            self._client = genai.Client(api_key=self.api_key)
-            logger.info("Initialized Gemini client for model '%s'", self.model_name)
+            self._client = OpenAI(
+                api_key=self.api_key,
+                base_url="https://openrouter.ai/api/v1"
+            )
+            logger.info(
+                "Initialized OpenRouter model '%s'",
+                self.model_name,
+            )
         except Exception as exc:
-            logger.exception("Failed to initialize Gemini client.")
-            raise GeminiAPIError(f"Failed to initialize Gemini client: {exc}") from exc
-
+            logger.exception("Failed to initialize OpenRouter")
+            raise GeminiAPIError(str(exc))
+        
     def generate_response(self, prompt: str) -> str:
-        """Send a prompt to Gemini and return the generated text response."""
-        if not isinstance(prompt, str) or not prompt.strip():
-            logger.warning("Received an empty prompt for Gemini.")
-            return "I couldn't generate an answer because the prompt was empty."
-
-        if not self.api_key or self._client is None:
-            logger.error("Gemini client is not initialized because no valid API key is configured.")
-            return "The Gemini service is unavailable right now because the API key is missing or invalid."
-
+        if not prompt.strip():
+            return "Prompt is empty."
         try:
-            response = self._client.models.generate_content(model=self.model_name, contents=prompt)
-        except Exception as exc:  # pragma: no cover - depends on SDK runtime
+            response = self._client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as exc:
             return self._handle_generation_error(exc)
-
-        return self._extract_response_text(response)
-
     def _handle_generation_error(self, exc: Exception) -> str:
-        """Translate Gemini SDK exceptions into friendly user-facing messages."""
+        """Handle OpenRouter API errors."""
         error_message = str(exc).lower()
-        if isinstance(exc, GeminiClientError):
-            raise exc
+        if "401" in error_message or "invalid api key" in error_message:
+            return "Invalid OpenRouter API Key."
 
-        if genai_errors is not None and isinstance(exc, genai_errors.APIError):
-            if "quota" in error_message or "resource exhausted" in error_message:
-                logger.warning("Gemini quota exceeded: %s", exc)
-                return "The Gemini service quota has been exceeded. Please try again later."
-            if "rate limit" in error_message or "429" in error_message:
-                logger.warning("Gemini rate limit exceeded: %s", exc)
-                return "The Gemini service is currently rate-limiting requests. Please try again shortly."
-            if "invalid model" in error_message or ("model" in error_message and "not found" in error_message):
-                logger.warning("Gemini model is invalid: %s", exc)
-                return "The configured Gemini model is not available. Please update the model setting."
-            logger.error("Gemini API request failed: %s", exc)
-            return "The Gemini service could not answer the question right now. Please try again later."
+        if "429" in error_message:
+            return "OpenRouter rate limit exceeded. Please try again later."
 
-        if genai_errors is not None and isinstance(exc, genai_errors.ClientError):
-            logger.error("Gemini client error: %s", exc)
-            return "The Gemini service rejected the request. Please verify your configuration."
-
-        if any(token in error_message for token in ["api key", "authentication", "forbidden", "permission"]):
-            logger.error("Invalid Gemini API key: %s", exc)
-            return "The Gemini API key is invalid or missing. Please verify your configuration."
-
-        if any(token in error_message for token in ["network", "connection", "timeout", "temporarily", "unavailable"]):
-            logger.warning("Gemini network or timeout issue: %s", exc)
-            return "The Gemini service is currently unreachable. Please check your network connection and try again."
-
-        logger.exception("Unexpected Gemini error.")
-        return "The Gemini service could not answer the question right now. Please try again later."
-
+        if "404" in error_message:
+            return "Model not found."
+   
+        logger.exception("OpenRouter Error")
+        return f"OpenRouter Error: {exc}"  
+    
+      
     def _extract_response_text(self, response: Any) -> str:
-        """Extract readable text from the Gemini response object."""
-        try:
-            text = getattr(response, "text", None)
-            if isinstance(text, str) and text.strip():
-                return text.strip()
-        except Exception:
-            logger.debug("Unable to read response.text attribute.", exc_info=True)
-
-        try:
-            if hasattr(response, "candidates") and response.candidates:
-                first_candidate = response.candidates[0]
-                if hasattr(first_candidate, "content") and hasattr(first_candidate.content, "parts"):
-                    parts: list[str] = []
-                    for part in first_candidate.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            parts.append(part.text)
-                    if parts:
-                        return "".join(parts).strip()
-        except Exception:
-            logger.debug("Unable to parse Gemini response candidates.", exc_info=True)
-
-        if response is None:
-            logger.warning("Gemini returned an empty response.")
-            return "I couldn't generate a reliable answer from the provided resume context."
-
-        return str(response).strip() or "I couldn't generate a reliable answer from the provided resume context."
+        ''''''
 
 
 def heuristic_answer(question: str, context: str) -> str:
@@ -192,7 +154,9 @@ def generate_answer(
 ) -> str:
 
     try:
-        client = GeminiClient(model_name=os.getenv("GEMINI_MODEL_NAME", os.getenv("MODEL_NAME", "gemini-2.5-flash")))
+        client = GeminiClient(
+     model_name=os.getenv("MODEL_NAME", "meta-llama/llama-3.3-70b-instruct")
+)
         return client.generate_response(prompt)
     except Exception:
         return heuristic_answer(question, context)
